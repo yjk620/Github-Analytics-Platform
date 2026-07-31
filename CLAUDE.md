@@ -86,10 +86,14 @@ A polished earlier phase beats a broken later one.
 - [x] Empty repo, first commit
 - [x] Python venv, dependencies pinned in `requirements.txt`
 - [x] `.gitignore` (Python template — protects `venv/` and `.env`)
-- [ ] FastAPI app with a `/health` route ← **currently here (Step 5)**
-- [ ] Env var loading via `.env` (python-dotenv or Pydantic Settings)
-- [ ] Postgres running locally via Docker
-- [ ] Deployed to Railway/Render as hello-world
+- [x] FastAPI app with a `/health` route
+- [x] Env var loading via `.env` (chose Pydantic Settings over python-dotenv,
+      for validation + fail-loudly-at-startup behavior)
+- [x] Postgres running locally via Docker (plain `docker run`, not
+      docker-compose — deliberately kept simple for a single-service setup).
+      Container name `postgres`, db `github_analytics`, confirmed reachable
+      from Python via `psycopg` (`SELECT 1` round-trip proved the connection).
+- [ ] Deployed to Railway/Render as hello-world ← **next up**
 - Done when: a live URL returns `{"status": "ok"}`.
 
 **Phase 1 — Auth + first real data (the spine)**

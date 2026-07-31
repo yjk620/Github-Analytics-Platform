@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # this whole file will crash with an error as soon as it runs - which is
     # what we want, so we notice the problem immediately instead of later.
     test_value: str
+    database_url: str
 
 # This is the line that actually does the work: it reads .env, finds
 # TEST_VALUE, checks it's text, and builds a `settings` object holding it.
