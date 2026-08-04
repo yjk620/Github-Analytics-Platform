@@ -93,8 +93,11 @@ A polished earlier phase beats a broken later one.
       docker-compose — deliberately kept simple for a single-service setup).
       Container name `postgres`, db `github_analytics`, confirmed reachable
       from Python via `psycopg` (`SELECT 1` round-trip proved the connection).
-- [ ] Deployed to Railway/Render as hello-world ← **next up**
-- Done when: a live URL returns `{"status": "ok"}`.
+- [x] Deployed to Railway as hello-world. Two-service confusion resolved along
+      the way (env vars must be set per-service, not shared automatically
+      within a Railway project); start command `uvicorn main:app --host
+      0.0.0.0 --port $PORT`; public domain generated via Settings → Networking.
+- **Phase 0 complete.** Live URL confirmed returning `{"status":"ok","test_value":"succeed"}`.
 
 **Phase 1 — Auth + first real data (the spine)**
 - GitHub OAuth login flow (hardest + most valuable piece — go slow)
