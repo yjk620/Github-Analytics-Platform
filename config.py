@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     # what we want, so we notice the problem immediately instead of later.
     test_value: str
     database_url: str
+    github_client_id: str
+    github_client_secret: str
+    github_redirect_uri: str 
 
 # This is the line that actually does the work: it reads .env, finds
 # TEST_VALUE, checks it's text, and builds a `settings` object holding it.
