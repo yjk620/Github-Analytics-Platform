@@ -28,4 +28,11 @@ def callback(code: str):
     },
     headers={"Accept": "application/json"}
   )
-  return {"access_token": response.json().get("access_token")}
+  token = response.json().get("access_token")
+
+  profile_data = httpx.get(
+    "https://api.github.com/user",
+    headers={"Authorization": f"Bearer {token}"}
+  )
+
+  return {"profile":profile_data.json()}
