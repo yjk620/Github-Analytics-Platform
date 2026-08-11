@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from config import settings
+import psycopg
 import httpx
 
 
@@ -34,5 +35,34 @@ def callback(code: str):
     "https://api.github.com/user",
     headers={"Authorization": f"Bearer {token}"}
   )
+  profile = profile_data.json()
 
-  return {"profile":profile_data.json()}
+  conn = psycopg.connect(settings.database_url)
+  cur = conn.cursor()
+  cur.execute(
+    """
+      INSERT INTO users (github_id, login, name, avatar_url, bio, access_token)
+      VALUES (%s, %s, %s, %s, %s, %s)
+      ON CONFLICT (github_id) DO UPDATE SET 
+        login = EXCLUDED.login, 
+        name = EXCLUDED.name, 
+        avatar_url = EXCLUDED.avatar_url, 
+        bio = EXCLUDED.bio, 
+        access_token = EXCLUDED.access_token,
+        updated_at = NOW()
+    """,
+    (
+      profile["id"],
+      profile["login"],
+      profile["name"],
+      profile["avatar_url"],
+      profile["bio"],
+      token
+    )
+  )
+  conn.commit()
+  conn.close()
+
+  return {"profile": profile}
+
+  
