@@ -3,7 +3,7 @@ from fastapi.responses import RedirectResponse
 from config import settings
 import psycopg
 import httpx
-
+import secrets
 
 app = FastAPI()
 #hcheck health: checks if the app is running and returns the test_value from the .env file
@@ -20,7 +20,7 @@ def auth_github():
 #route #2: receives the code from GitHub, exchanges it for an access token
 @app.get("/auth/callback")
 def callback(code: str):
-  response = httpx.post(
+  token_response = httpx.post(
     "https://github.com/login/oauth/access_token",
     data={
       "client_id": settings.github_client_id,
@@ -29,7 +29,7 @@ def callback(code: str):
     },
     headers={"Accept": "application/json"}
   )
-  token = response.json().get("access_token")
+  token = token_response.json().get("access_token")
 
   profile_data = httpx.get(
     "https://api.github.com/user",
@@ -60,9 +60,25 @@ def callback(code: str):
       token
     )
   )
+
+  session_id = secrets.token_urlsafe(32)
+  cur.execute(
+    """
+      INSERT INTO sessions (session_id, github_id)
+      VALUES (%s, %s)
+    """,
+    (
+      session_id,
+      profile["id"]
+    )
+  )
+
+  session_response = RedirectResponse(url="/dashboard")
+  session_response.set_cookie(key="session_id", value=session_id, httponly=True)
+
   conn.commit()
   conn.close()
 
-  return {"profile": profile}
+  return session_response
 
   
