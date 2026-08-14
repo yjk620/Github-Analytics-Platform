@@ -1,9 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Cookie
 from fastapi.responses import RedirectResponse
 from config import settings
 import psycopg
 import httpx
 import secrets
+
 
 app = FastAPI()
 #hcheck health: checks if the app is running and returns the test_value from the .env file
@@ -81,4 +82,28 @@ def callback(code: str):
 
   return session_response
 
-  
+@app.get("/dashboard")
+def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty cookie
+  conn = psycopg.connect(settings.database_url)
+  cur = conn.cursor()
+  cur.execute(
+    """ 
+      SELECT u.login, u.name, u.avatar_url, u.bio
+      FROM sessions s
+      JOIN users u ON s.github_id = u.github_id
+      WHERE s.session_id = %s AND s.expires_at > NOW()
+    """,
+    (session_id,)
+  )
+
+  row = cur.fetchone()
+  conn.close()
+  if row:
+    return {
+      "login": row[0],
+      "name": row[1],
+      "avatar_url": row[2],
+      "bio": row[3]
+    }
+  else:
+    return {"error": "Not Logged In"}
