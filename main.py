@@ -82,28 +82,88 @@ def callback(code: str):
 
   return session_response
 
+#route #3: protected page. reads the session cookie, fetches the user's repos
+#from GitHub, stores them, and returns the user plus their repo list
 @app.get("/dashboard")
 def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty cookie
   conn = psycopg.connect(settings.database_url)
   cur = conn.cursor()
+
+  #find who this session belongs to. access_token is needed to call GitHub below
   cur.execute(
-    """ 
-      SELECT u.login, u.name, u.avatar_url, u.bio
+    """
+      SELECT u.github_id, u.login, u.name, u.avatar_url, u.bio, u.access_token
       FROM sessions s
       JOIN users u ON s.github_id = u.github_id
       WHERE s.session_id = %s AND s.expires_at > NOW()
     """,
     (session_id,)
   )
-
   row = cur.fetchone()
-  conn.close()
-  if row:
-    return {
-      "login": row[0],
-      "name": row[1],
-      "avatar_url": row[2],
-      "bio": row[3]
-    }
-  else:
+
+  #no row means the cookie is missing, fake, or expired
+  if row is None:
+    conn.close()
     return {"error": "Not Logged In"}
+
+  github_id, login, name, avatar_url, bio, access_token = row
+
+  #fetch this user's repos from GitHub. returns a JSON array, not a single object
+  repos_response = httpx.get(
+    "https://api.github.com/user/repos?per_page=100",
+    headers={"Authorization": f"Bearer {access_token}"}
+  )
+  repos = repos_response.json()
+
+  #upsert each repo. same ON CONFLICT pattern as users - repos change over time
+  for repo in repos:
+    cur.execute(
+      """
+        INSERT INTO repositories (
+          repo_github_id, owner_github_id, name, language,
+          stars_count, html_url, fork, fork_count, pushed_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (repo_github_id) DO UPDATE SET
+          name = EXCLUDED.name,
+          language = EXCLUDED.language,
+          stars_count = EXCLUDED.stars_count,
+          html_url = EXCLUDED.html_url,
+          fork = EXCLUDED.fork,
+          fork_count = EXCLUDED.fork_count,
+          pushed_at = EXCLUDED.pushed_at,
+          updated_at = NOW()
+      """,
+      (
+        repo["id"],
+        github_id,
+        repo["name"],
+        repo["language"],
+        repo["stargazers_count"],
+        repo["html_url"],
+        repo["fork"],
+        repo["forks_count"],
+        repo["pushed_at"]
+      )
+    )
+
+  conn.commit()
+  conn.close()
+
+  return {
+    "login": login,
+    "name": name,
+    "avatar_url": avatar_url,
+    "bio": bio,
+    "repos": [
+      {
+        "name": repo["name"],
+        "language": repo["language"],
+        "stars": repo["stargazers_count"],
+        "url": repo["html_url"],
+        "pushed_at": repo["pushed_at"]
+      }
+      for repo in repos
+    ]
+  }
+
