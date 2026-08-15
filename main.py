@@ -10,7 +10,12 @@ app = FastAPI()
 #hcheck health: checks if the app is running and returns the test_value from the .env file
 @app.get("/health")
 def health_check():
-  return {"status": "ok", "test_value": settings.test_value}
+  conn = psycopg.connect(settings.database_url)
+  cur = conn.cursor()
+  cur.execute("SELECT current_database(), current_user, (SELECT count(*) FROM information_schema.tables WHERE table_schema='public')")
+  db, user, table_count = cur.fetchone()
+  conn.close()
+  return {"status": "ok", "database": db, "user": user, "public_tables": table_count}
 
 #route #1: kicks off login, 302 redirect to github login page
 @app.get("/auth/github")
@@ -121,9 +126,9 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
       """
         INSERT INTO repositories (
           repo_github_id, owner_github_id, name, language,
-          stars_count, html_url, fork, fork_count, pushed_at
+          stars_count, html_url, fork, fork_count, pushed_at, description
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (repo_github_id) DO UPDATE SET
           name = EXCLUDED.name,
           language = EXCLUDED.language,
@@ -132,7 +137,8 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
           fork = EXCLUDED.fork,
           fork_count = EXCLUDED.fork_count,
           pushed_at = EXCLUDED.pushed_at,
-          updated_at = NOW()
+          updated_at = NOW(),
+          description = EXCLUDED.description
       """,
       (
         repo["id"],
@@ -143,7 +149,8 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
         repo["html_url"],
         repo["fork"],
         repo["forks_count"],
-        repo["pushed_at"]
+        repo["pushed_at"],
+        repo["description"]
       )
     )
 
