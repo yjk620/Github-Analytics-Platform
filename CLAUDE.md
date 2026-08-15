@@ -100,14 +100,30 @@ A polished earlier phase beats a broken later one.
 - **Phase 0 complete.** Live URL confirmed returning `{"status":"ok","test_value":"succeed"}`.
 
 **Phase 1 — Auth + first real data (the spine)**
-- GitHub OAuth login flow (hardest + most valuable piece — go slow)
-- Session or JWT auth (pick one, don't build both)
-- After login, call GitHub API once, on demand, for the user's repos
-- Store in Postgres: `users` and `repositories` tables with a real foreign key
-- Validate with Pydantic
-- Dashboard listing the logged-in user's repos (name, language, stars, last commit)
-- Done when: log in with GitHub, real repos appear on a deployed dashboard.
-- Must be able to explain WHY the OAuth flow has the steps it does before moving on.
+- [x] GitHub OAuth login flow — works end to end locally
+- [x] Sessions (chose DB-backed sessions over JWT, for instant revocation)
+- [x] Fetch repos from GitHub — happens on dashboard load, deliberately, so the
+      cost of per-request fetching is felt before Phase 3 moves it to a job
+- [x] `users`, `sessions`, `repositories` tables with real foreign keys
+- [x] Dashboard listing the logged-in user's repos
+- [ ] **Deployed and working** ← the only thing left
+
+**Deployment state (blocked, as of 2026-08-15):**
+- Two GitHub OAuth apps: dev (localhost callback) and prod (Railway callback).
+  Prod credentials live only in Railway's Variables, never in `.env`.
+- The deployed app connects to a Postgres with **zero tables**. `schema.sql` was
+  loaded into a *different* instance — same db name (`railway`) and user
+  (`postgres`), different host, which is why the connection strings looked
+  identical. Likely the first Postgres service, deleted after a password leak,
+  whose volume was still pending cleanup.
+- Decision pending: (A) load schema into the correct instance via its public URL,
+  or (B) have the app run `schema.sql` at startup (idempotent, self-provisioning,
+  recommended — but note it can't ALTER existing tables; that's what migration
+  tools solve).
+- Loose end: remove the temporary DB diagnostic from `/health` once resolved.
+- Gotcha hit twice: `git add` alone doesn't deploy. Staged ≠ committed ≠ pushed,
+  and a push doesn't guarantee Railway picked it up — verify what's actually
+  deployed before debugging the code.
 
 **Phase 2 — Commits + a real schema**
 - Fetch commits per repo into a `commits` table (FK to `repositories`)

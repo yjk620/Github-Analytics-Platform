@@ -7,15 +7,27 @@ import secrets
 
 
 app = FastAPI()
+
+#run schema.sql against whatever database this environment points at, so a fresh
+#deploy provisions its own tables. every statement is CREATE TABLE IF NOT EXISTS,
+#so running this on every boot is a no-op once the tables already exist.
+#note: this only CREATES tables - it cannot ALTER existing ones. changing a column
+#on a table that already exists still needs a manual ALTER (or a migration tool).
+def init_db():
+  with open("schema.sql") as f:
+    schema = f.read()
+  conn = psycopg.connect(settings.database_url)
+  cur = conn.cursor()
+  cur.execute(schema)
+  conn.commit()
+  conn.close()
+
+init_db()
+
 #hcheck health: checks if the app is running and returns the test_value from the .env file
 @app.get("/health")
 def health_check():
-  conn = psycopg.connect(settings.database_url)
-  cur = conn.cursor()
-  cur.execute("SELECT current_database(), current_user, (SELECT count(*) FROM information_schema.tables WHERE table_schema='public')")
-  db, user, table_count = cur.fetchone()
-  conn.close()
-  return {"status": "ok", "database": db, "user": user, "public_tables": table_count}
+  return {"status": "ok", "test_value": settings.test_value}
 
 #route #1: kicks off login, 302 redirect to github login page
 @app.get("/auth/github")
