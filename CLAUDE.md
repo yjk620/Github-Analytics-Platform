@@ -106,24 +106,28 @@ A polished earlier phase beats a broken later one.
       cost of per-request fetching is felt before Phase 3 moves it to a job
 - [x] `users`, `sessions`, `repositories` tables with real foreign keys
 - [x] Dashboard listing the logged-in user's repos
-- [ ] **Deployed and working** ← the only thing left
+- [x] **Deployed and working** — real login, real repos, live URL
+- **Phase 1 complete (2026-08-15).**
 
-**Deployment state (blocked, as of 2026-08-15):**
+**Deployment notes:**
 - Two GitHub OAuth apps: dev (localhost callback) and prod (Railway callback).
   Prod credentials live only in Railway's Variables, never in `.env`.
-- The deployed app connects to a Postgres with **zero tables**. `schema.sql` was
-  loaded into a *different* instance — same db name (`railway`) and user
-  (`postgres`), different host, which is why the connection strings looked
-  identical. Likely the first Postgres service, deleted after a password leak,
-  whose volume was still pending cleanup.
-- Decision pending: (A) load schema into the correct instance via its public URL,
-  or (B) have the app run `schema.sql` at startup (idempotent, self-provisioning,
-  recommended — but note it can't ALTER existing tables; that's what migration
-  tools solve).
-- Loose end: remove the temporary DB diagnostic from `/health` once resolved.
-- Gotcha hit twice: `git add` alone doesn't deploy. Staged ≠ committed ≠ pushed,
-  and a push doesn't guarantee Railway picked it up — verify what's actually
-  deployed before debugging the code.
+- Tables are created by `init_db()` in `main.py`, which runs `schema.sql` at
+  startup against `settings.database_url` — the same connection string the rest
+  of the app uses. This was the fix for a long debugging session where the schema
+  had been loaded into a *different* Postgres instance than the app connected to
+  (same db name `railway` and user `postgres`, different host, so the strings
+  looked identical). Letting the app provision its own tables removes the
+  possibility of the two disagreeing.
+- Limitation to remember: `init_db()` only CREATEs tables, it cannot ALTER them.
+  Adding a column to an existing table still needs a manual ALTER on each
+  environment. Migration tooling (Alembic) is the real answer if the schema
+  starts changing often — worth reaching for in Phase 2 if it becomes painful.
+- Railway's auto-deploy did not fire on push twice; deploys had to be triggered
+  manually. Check Settings → Source if this continues.
+- Debugging lesson worth keeping: staged ≠ committed ≠ pushed ≠ deployed. When
+  local and production disagree, verify what is *actually running* (e.g. have an
+  endpoint report its own state) before suspecting the code.
 
 **Phase 2 — Commits + a real schema**
 - Fetch commits per repo into a `commits` table (FK to `repositories`)
