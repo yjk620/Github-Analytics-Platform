@@ -30,3 +30,13 @@ CREATE TABLE IF NOT EXISTS repositories (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     description TEXT
 );
+
+CREATE TABLE IF NOT EXISTS commits (
+  sha TEXT PRIMARY KEY,
+  repo_github_id BIGINT NOT NULL REFERENCES repositories(repo_github_id) ON DELETE CASCADE,
+  message TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  committed_at TIMESTAMPTZ NOT NULL,
+  html_url TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)
