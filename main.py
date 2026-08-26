@@ -202,9 +202,31 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
           comm["html_url"]
         )
       )
-
-
   conn.commit()
+
+#create rows by repo containing all of its commits
+  cur.execute (
+    """
+      SELECT r.name, r.language, r.stars_count, r.html_url, r.pushed_at, COUNT(c.sha) AS commit_count
+      FROM repositories r
+      LEFT JOIN commits c ON r.repo_github_id = c.repo_github_id
+      WHERE r.owner_github_id = %s
+      GROUP BY r.name, r.language, r.stars_count, r.html_url, r.pushed_at
+      ORDER BY commit_count DESC
+    """,
+    (github_id,)
+  )
+  repo_rows = cur.fetchall()
+
+  #1. FROM, call repostitories, r, creating (repos_count) # of rows
+  #2. LEFT JOIN, call commits as c and find commits with matching repo_github_id and expand rows
+  #   -> (repo_count) # of rows -> (commit_count) # of rows
+  #    **  if a repo have no matching commit KEEP IT (THIS IS WHAT 'LEFT' DO)
+  #3. WHERE, filter out rows that are NOT the current user's github_id
+  #4. GROUP BY, sort the rows into buckets
+  #5. SELECT, with the sorted buckets emit one row per bucket, making (commit_count) # of rows back into (repo_count) # of rows
+  #6. ORDER, order the rows by commit_count descending orders
+
   conn.close()
 
   return {
@@ -214,13 +236,14 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
     "bio": bio,
     "repos": [
       {
-        "name": repo["name"],
-        "language": repo["language"],
-        "stars": repo["stargazers_count"],
-        "url": repo["html_url"],
-        "pushed_at": repo["pushed_at"]
+        "name": r[0],
+        "language": r[1],
+        "stars": r[2],
+        "url": r[3],
+        "pushed_at": r[4],
+        "commit_count": r[5]
       }
-      for repo in repos
+      for r in repo_rows
     ]
   }
 
