@@ -249,6 +249,23 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
   #    no LEFT JOIN creating phantom rows - every row in a bucket is a real repo
   #5. ORDER, most-used language first
 
+
+
+  #commit activiy overtime 
+  cur.execute (
+    """
+      SELECT DATE_TRUNC('month', c.committed_at) AS month, COUNT(*) AS commit_count
+      FROM commits c
+      JOIN repositories r ON c.repo_github_id = r.repo_github_id
+      WHERE r.owner_github_id = %s
+      GROUP BY month
+      ORDER BY month DESC
+    """,
+    (github_id,)
+  )
+  activity_rows = cur.fetchall()
+
+
   conn.close()
 
   return {
@@ -267,12 +284,21 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
       }
       for r in repo_rows
     ],
+
     "languages": [
       {
         "language": l[0],
         "repo_count": l[1]
       }
       for l in language_rows
+    ],
+
+    "activities": [
+      {
+        "month": a[0],
+        "commit_count": a[1]
+      }
+      for a in activity_rows
     ]
   }
 
