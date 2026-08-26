@@ -227,6 +227,28 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
   #5. SELECT, with the sorted buckets emit one row per bucket, making (commit_count) # of rows back into (repo_count) # of rows
   #6. ORDER, order the rows by commit_count descending orders
 
+#language breakdown: how many repos use each language
+  cur.execute(
+    """
+      SELECT r.language, COUNT(*) AS repo_count
+      FROM repositories r
+      WHERE r.owner_github_id = %s AND r.language IS NOT NULL
+      GROUP BY r.language
+      ORDER BY repo_count DESC
+    """,
+    (github_id,)
+  )
+  language_rows = cur.fetchall()
+
+  #1. FROM, only repositories this time - no JOIN needed since language lives here
+  #2. WHERE, this user's repos only, and skip repos with no language
+  #    ** empty repos have language = NULL. grouping would make a "NULL" bucket,
+  #       which isn't a language, so filter those rows out before grouping
+  #3. GROUP BY, one bucket per distinct language
+  #4. SELECT, COUNT(*) is safe here (unlike COUNT(c.sha) above) because there is
+  #    no LEFT JOIN creating phantom rows - every row in a bucket is a real repo
+  #5. ORDER, most-used language first
+
   conn.close()
 
   return {
@@ -244,6 +266,13 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
         "commit_count": r[5]
       }
       for r in repo_rows
+    ],
+    "languages": [
+      {
+        "language": l[0],
+        "repo_count": l[1]
+      }
+      for l in language_rows
     ]
   }
 
