@@ -38,7 +38,7 @@ def auth_github():
 #route #2: receives the code from GitHub, exchanges it for an access token
 @app.get("/auth/callback")
 def callback(code: str):
-  token_response = httpx.post(
+  access_token_response = httpx.post(
     "https://github.com/login/oauth/access_token",
     data={
       "client_id": settings.github_client_id,
@@ -47,11 +47,11 @@ def callback(code: str):
     },
     headers={"Accept": "application/json"}
   )
-  token = token_response.json().get("access_token")
+  access_token = access_token_response.json().get("access_token")
 
   profile_data = httpx.get(
     "https://api.github.com/user",
-    headers={"Authorization": f"Bearer {token}"}
+    headers={"Authorization": f"Bearer {access_token}"}
   )
   profile = profile_data.json()
 
@@ -75,7 +75,7 @@ def callback(code: str):
       profile["name"],
       profile["avatar_url"],
       profile["bio"],
-      token
+      access_token
     )
   )
 
@@ -106,6 +106,7 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
   conn = psycopg.connect(settings.database_url)
   cur = conn.cursor()
 
+#================ sessions ========================
   #find who this session belongs to. access_token is needed to call GitHub below
   cur.execute(
     """
@@ -117,14 +118,24 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
     (session_id,)
   )
   row = cur.fetchone()
+#1. grab the sessions table with name s
+#2. join the users table, u, on the condition that the github_id in sessions matches the github_id in users
+#3. check if session_id matches the provided session_id and that the session has not expired
+#4. retrieve informations in users table
+#5. set row to result of the query
 
   #no row means the cookie is missing, fake, or expired
   if row is None:
     conn.close()
     return {"error": "Not Logged In"}
 
+#label the values in the row for easier access later
   github_id, login, name, avatar_url, bio, access_token = row
 
+
+
+
+#================== repositories ==========================
   #fetch this user's repos from GitHub. returns a JSON array, not a single object
   repos_response = httpx.get(
     "https://api.github.com/user/repos?per_page=100",
@@ -151,7 +162,7 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
           pushed_at = EXCLUDED.pushed_at,
           updated_at = NOW(),
           description = EXCLUDED.description
-      """,
+      """,  
       (
         repo["id"],
         github_id,
@@ -165,6 +176,33 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
         repo["description"]
       )
     )
+
+  for repo in repos:
+    commit_response = httpx.get(
+      f"https://api.github.com/repos/{login}/{repo['name']}/commits?per_page=100",
+      headers={"Authorization": f"Bearer {access_token}"}
+    )
+    comms = commit_response.json()
+
+    for comm in comms:
+      cur.execute( 
+        """
+          INSERT INTO commits (
+            sha, repo_github_id, message, author_name, 
+            committed_at, html_url)
+          VALUES (%s, %s, %s, %s, %s, %s)
+          ON CONFLICT (sha) DO NOTHING
+        """,
+        (
+          comm["sha"],
+          repo["id"],
+          comm["commit"]["message"],
+          comm["commit"]["author"]["name"],
+          comm["commit"]["author"]["date"],
+          comm["html_url"]
+        )
+      )
+
 
   conn.commit()
   conn.close()
