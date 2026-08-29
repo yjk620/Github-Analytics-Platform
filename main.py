@@ -102,7 +102,7 @@ def callback(code: str):
 #route #3: protected page. reads the session cookie, fetches the user's repos
 #from GitHub, stores them, and returns the user plus their repo list
 @app.get("/dashboard")
-def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty cookie
+def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20): #default Cookie to none if empty cookie
   conn = psycopg.connect(settings.database_url)
   cur = conn.cursor()
 
@@ -176,14 +176,14 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
         repo["description"]
       )
     )
-
+  
   for repo in repos:
     commit_response = httpx.get(
       f"https://api.github.com/repos/{login}/{repo['name']}/commits?per_page=100",
       headers={"Authorization": f"Bearer {access_token}"}
     )
     comms = commit_response.json()
-
+    
     for comm in comms:
       cur.execute( 
         """
@@ -204,7 +204,16 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
       )
   conn.commit()
 
-#create rows by repo containing all of its commits
+
+
+  #create rows by repo containing all of its commits and pagination 20 repos per page
+  offset=(page-1)*per_page
+  cur.execute(
+      "SELECT COUNT(*) FROM repositories r WHERE owner_github_id = %s",
+      (github_id,)
+  )
+  repo_count = cur.fetchone()[0] #fetchone() would return tuple, so just get the first index which is the integer we want
+  has_next = repo_count > page*per_page
   cur.execute (
     """
       SELECT r.name, r.language, r.stars_count, r.html_url, r.pushed_at, COUNT(c.sha) AS commit_count
@@ -213,12 +222,17 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
       WHERE r.owner_github_id = %s
       GROUP BY r.name, r.language, r.stars_count, r.html_url, r.pushed_at
       ORDER BY commit_count DESC
+      LIMIT %s OFFSET %s
     """,
-    (github_id,)
+    (
+      github_id,
+      per_page,
+      offset
+    )
   )
   repo_rows = cur.fetchall()
 
-  #1. FROM, call repostitories, r, creating (repos_count) # of rows
+  #1. FROM, call repostitories r
   #2. LEFT JOIN, call commits as c and find commits with matching repo_github_id and expand rows
   #   -> (repo_count) # of rows -> (commit_count) # of rows
   #    **  if a repo have no matching commit KEEP IT (THIS IS WHAT 'LEFT' DO)
@@ -240,14 +254,11 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
   )
   language_rows = cur.fetchall()
 
-  #1. FROM, only repositories this time - no JOIN needed since language lives here
+  #1. FROM, call repository r
   #2. WHERE, this user's repos only, and skip repos with no language
-  #    ** empty repos have language = NULL. grouping would make a "NULL" bucket,
-  #       which isn't a language, so filter those rows out before grouping
   #3. GROUP BY, one bucket per distinct language
-  #4. SELECT, COUNT(*) is safe here (unlike COUNT(c.sha) above) because there is
-  #    no LEFT JOIN creating phantom rows - every row in a bucket is a real repo
-  #5. ORDER, most-used language first
+  #4. SELECT, count each bucket as repo_count
+  #5. ORDER, sort by descending repo_count
 
 
 
@@ -265,6 +276,12 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
   )
   activity_rows = cur.fetchall()
 
+  #1. FROM, call commits c
+  #2. JOIN, call repository r, matching by repo_github_id on each commit and repo
+  #3. WHERE, keep only commits belonging to this user's repos
+  #4. GROUP BY, put all rows in same month into same bucket
+  #5. SELECT, emit one row per month with COUNT(*) of the commits in that bucket
+  #6. ORDER, newest month first
 
   conn.close()
 
@@ -299,6 +316,13 @@ def dashboard(session_id: str = Cookie(None)): #default Cookie to none if empty 
         "commit_count": a[1]
       }
       for a in activity_rows
-    ]
+    ],
+
+    "pagination": {
+      "page": page,
+      "per_page": per_page,
+      "total": repo_count,
+      "has_next": has_next
+    }
   }
 
