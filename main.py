@@ -102,7 +102,7 @@ def callback(code: str):
 #route #3: protected page. reads the session cookie, fetches the user's repos
 #from GitHub, stores them, and returns the user plus their repo list
 @app.get("/dashboard")
-def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20): #default Cookie to none if empty cookie
+def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20, language: str=None): #default Cookie to none if empty cookie
   conn = psycopg.connect(settings.database_url)
   cur = conn.cursor()
 
@@ -206,30 +206,41 @@ def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20): #d
 
 
 
-  #create rows by repo containing all of its commits and pagination 20 repos per page
+  #create rows by repo containing all of its commits 
+  #pagination 20 repos per page
+  #filter by language
   offset=(page-1)*per_page
-  cur.execute(
-      "SELECT COUNT(*) FROM repositories r WHERE owner_github_id = %s",
-      (github_id,)
-  )
-  repo_count = cur.fetchone()[0] #fetchone() would return tuple, so just get the first index which is the integer we want
+
+  sql = """ 
+    SELECT r.name, r.language, r.stars_count, r.html_url, r.pushed_at, COUNT(c.sha) AS commit_count
+    FROM repositories r
+    LEFT JOIN commits c ON r.repo_github_id = c.repo_github_id
+    WHERE r.owner_github_id = %s
+  """
+  params = [github_id]
+
+  repo_count_sql = "SELECT COUNT(*) FROM repositories r WHERE r.owner_github_id = %s"
+  repo_count_params = [github_id]
+
+  if language:
+    sql+=" AND language = %s"
+    repo_count_sql+=" AND language = %s"
+    params.append(language)
+    repo_count_params.append(language)
+
+  cur.execute(repo_count_sql, repo_count_params)
+  repo_count = cur.fetchone()[0]
   has_next = repo_count > page*per_page
-  cur.execute (
-    """
-      SELECT r.name, r.language, r.stars_count, r.html_url, r.pushed_at, COUNT(c.sha) AS commit_count
-      FROM repositories r
-      LEFT JOIN commits c ON r.repo_github_id = c.repo_github_id
-      WHERE r.owner_github_id = %s
-      GROUP BY r.name, r.language, r.stars_count, r.html_url, r.pushed_at
-      ORDER BY commit_count DESC
-      LIMIT %s OFFSET %s
-    """,
-    (
-      github_id,
-      per_page,
-      offset
-    )
-  )
+    
+  sql+="""
+    GROUP BY r.name, r.language, r.stars_count, r.html_url, r.pushed_at
+    ORDER BY commit_count DESC
+    LIMIT %s OFFSET %s
+  """
+  params.append(per_page)
+  params.append(offset)
+
+  cur.execute(sql, params)
   repo_rows = cur.fetchall()
 
   #1. FROM, call repostitories r
