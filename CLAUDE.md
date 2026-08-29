@@ -130,11 +130,27 @@ A polished earlier phase beats a broken later one.
   endpoint report its own state) before suspecting the code.
 
 **Phase 2 — Commits + a real schema**
-- Fetch commits per repo into a `commits` table (FK to `repositories`)
-- First real encounter with GitHub rate limits — handle deliberately here
-- Add indexes where queries need them; be able to explain why
-- Dashboard gains: commit counts, language breakdown, activity over time
-- Server-side filtering and pagination on the repo list
+- [x] `commits` table (FK to `repositories`), fetched per repo on dashboard load
+- [x] Dashboard analytics, all computed in SQL rather than Python:
+      commit counts per repo (LEFT JOIN + GROUP BY), language breakdown
+      (GROUP BY on repositories), activity over time (DATE_TRUNC by month)
+- [x] Server-side pagination (LIMIT/OFFSET) and optional language filter, with
+      the WHERE clause built by concatenation so filters compose
+- [x] **Indexes — deliberately none.** Measured, not assumed:
+      - Current volume (5 repos, 83 commits): Seq Scan, ~0.05ms. An index would
+        be ignored entirely.
+      - Benchmarked at 1000 repos / 200k commits: dashboard query took ~52ms,
+        and adding an index on `commits.repo_github_id` only moved it to ~39ms —
+        Postgres still chose a Seq Scan. **Indexes help queries that skip most
+        rows; they don't help queries that need all of them.** This query
+        aggregates every commit, so there is nothing to skip.
+      - Same data, single-repo lookup (`WHERE repo_github_id = 42`, 200 of 200k
+        rows): 5.2ms → 0.57ms with the index, and the planner used it. That is
+        the shape of query an index is for.
+      - So the real fix at scale is restructuring — paginate to the current
+        page's repos *before* aggregating — not adding an index.
+      - Primary keys (`sessions.session_id` etc.) are indexed automatically.
+- [ ] Rate limit handling — the one Phase 2 item still open
 - Done when: dashboard shows commit analytics, repo list filters/paginates
   server-side. **This is the point the project becomes resume-worthy.**
 
