@@ -54,7 +54,7 @@ comparisons.
 
 | Layer            | Choice                                                          |
 |------------------|------------------------------------------------------------------|
-| Language         | Python 3.11+                                                     |
+| Language         | Python 3.13 (pinned in `.python-version` so local == Railway)     |
 | Web framework    | FastAPI                                                           |
 | Server           | uvicorn (ASGI server running the FastAPI app)                    |
 | Database         | PostgreSQL                                                        |
@@ -125,6 +125,12 @@ A polished earlier phase beats a broken later one.
   starts changing often — worth reaching for in Phase 2 if it becomes painful.
 - Railway's auto-deploy did not fire on push twice; deploys had to be triggered
   manually. Check Settings → Source if this continues.
+- Python version is pinned in `.python-version` (3.13), read by both the local
+  venv and Railway's builder. Before this, local ran 3.9.6 (Apple's bundled
+  Python, EOL since Oct 2025) while Railway picked its own newer default — so
+  syntax valid in prod was a `SyntaxError` locally. An unpinned runtime version
+  is the same class of bug as the schema-loaded-into-the-wrong-database one:
+  two environments silently disagreeing.
 - Debugging lesson worth keeping: staged ≠ committed ≠ pushed ≠ deployed. When
   local and production disagree, verify what is *actually running* (e.g. have an
   endpoint report its own state) before suspecting the code.
