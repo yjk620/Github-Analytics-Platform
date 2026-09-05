@@ -156,7 +156,27 @@ A polished earlier phase beats a broken later one.
       - So the real fix at scale is restructuring — paginate to the current
         page's repos *before* aggregating — not adding an index.
       - Primary keys (`sessions.session_id` etc.) are indexed automatically.
-- [ ] Rate limit handling — the one Phase 2 item still open
+- [~] Rate limit handling — partially done, still the open Phase 2 item
+      - [x] Incremental fetch: `MAX(committed_at)` per repo becomes GitHub's
+            `since` param, so only new commits come back. Measured ~2.5s → ~2.0s
+            per dashboard load.
+      - **Important nuance:** `since` does NOT reduce rate limit usage. The limit
+        counts *requests*, not bytes, and the route still makes 1 + N calls per
+        load. It saves bandwidth and wasted INSERT attempts, not quota.
+      - [ ] **ETags / conditional requests** — this is the actual quota fix.
+            GitHub returns an `ETag` on every response; send it back as
+            `If-None-Match` and an unchanged repo answers `304 Not Modified`,
+            which does **not** count against the rate limit. For 5 repos where 4
+            are dormant that's 6 requests → 2.
+      - Note: `since` is inclusive, so the newest stored commit is returned every
+        time. `ON CONFLICT (sha) DO NOTHING` absorbs it.
+
+**Housekeeping TODO (raised 2026-09-04, not yet done):**
+- Expired sessions accumulate — 11 dead rows already. Needs a periodic
+  `DELETE FROM sessions WHERE expires_at < NOW()`. Natural fit for the Phase 3
+  scheduler rather than a separate mechanism.
+- `init_db()` is the one DB function without `try/finally`. Harmless (a failure
+  there kills startup anyway) but inconsistent with `callback` and `dashboard`.
 - Done when: dashboard shows commit analytics, repo list filters/paginates
   server-side. **This is the point the project becomes resume-worthy.**
 
