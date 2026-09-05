@@ -24,8 +24,7 @@ def init_db():
 
 init_db()
 
-#the session cookie may only travel over HTTPS in production, but local dev runs
-#on plain http. the redirect URI already tells us which environment this is.
+#Boolean flag variable, if redirect_uri -> True (cookie secure), else False (cookie not secure)
 COOKIE_SECURE = settings.github_redirect_uri.startswith("https://")
 
 #hcheck health: checks if the app is running and returns the test_value from the .env file
@@ -53,9 +52,7 @@ def callback(code: str):
   )
   access_token = access_token_response.json().get("access_token")
 
-  #a failed exchange (expired code, reused code, wrong secret) still answers 200,
-  #just without an access_token. carrying on would KeyError on profile["id"] below
-  #and surface as a bare 500 that says nothing about the real cause.
+#access token error case
   if not access_token:
     return {"error": "GitHub login failed"}
 
@@ -66,6 +63,7 @@ def callback(code: str):
   profile = profile_data.json()
 
   conn = psycopg.connect(settings.database_url)
+
   #finally runs on every exit path, including an exception partway through. without
   #it a crash leaks the connection, and postgres stops accepting new ones at 100.
   try:
@@ -108,13 +106,14 @@ def callback(code: str):
   finally:
     conn.close()
 
+  #create a redirect response to dashboard
   session_response = RedirectResponse(url="/dashboard")
-  session_response.set_cookie(
-    key="session_id",
-    value=session_id,
-    httponly=True,     #javascript cannot read it, so XSS cannot steal the session
-    secure=COOKIE_SECURE,  #HTTPS only in production
-    samesite="lax"     #not sent on cross-site POSTs, which blocks basic CSRF
+  session_response.set_cookie( #attach cookie to the response
+    key="session_id", #label cookie as session_id so that the browser can send it back to the server on future requests
+    value=session_id,  #the real cookie data
+    httponly=True,     #Disable JS accessing the cookie, which blocks XSS attacks
+    secure=COOKIE_SECURE,  #sends cookie only when COOKIE_SECURE is True
+    samesite="lax"     #restricts requests from other sites
   )
 
   return session_response
@@ -163,8 +162,7 @@ def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20, lan
       headers={"Authorization": f"Bearer {access_token}"}
     )
 
-    #same list-vs-dict problem as the commits call below, but there is no single
-    #repo to skip here - if this fails there is nothing to sync at all, so stop.
+    #GitHub only sends a list of repos on 200. every other status sends an error msg
     if repos_response.status_code != 200:
       return {"error": f"Could not fetch repos from GitHub (HTTP {repos_response.status_code})"}
 
@@ -203,10 +201,18 @@ def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20, lan
           repo["description"]
         )
       )
-    #found me
+
     for repo in repos:
+      cur.execute("SELECT MAX(committed_at) FROM commits WHERE repo_github_id = %s", (repo["id"],))
+      latest_commit_date = cur.fetchone()[0]
+
+      if latest_commit_date is None: 
+        since = "1970-01-01T00:00:00Z" #if no commits, set to epoch time
+      else: since = latest_commit_date.isoformat() #convert datetime to ISO 8601 string
+      since_param = f"since={since}"
+
       commit_response = httpx.get(
-        f"https://api.github.com/repos/{repo['owner']['login']}/{repo['name']}/commits?per_page=100",
+        f"https://api.github.com/repos/{repo['owner']['login']}/{repo['name']}/commits?per_page=100&{since_param}",
         headers={"Authorization": f"Bearer {access_token}"}
       )
 
@@ -263,7 +269,7 @@ def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20, lan
       repo_count_params.append(language)
 
     cur.execute(repo_count_sql, repo_count_params)
-    repo_count = cur.fetchone()[0]
+    repo_count = cur.fetchone()[0] #the [0] only returns the first colum of the tuple, which is the count
     has_next = repo_count > page*per_page
 
     sql+="""
@@ -277,14 +283,20 @@ def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20, lan
     cur.execute(sql, params)
     repo_rows = cur.fetchall()
 
-    #1. FROM, call repostitories r
-    #2. LEFT JOIN, call commits as c and find commits with matching repo_github_id and expand rows
-    #   -> (repo_count) # of rows -> (commit_count) # of rows
-    #    **  if a repo have no matching commit KEEP IT (THIS IS WHAT 'LEFT' DO)
-    #3. WHERE, filter out rows that are NOT the current user's github_id
-    #4. GROUP BY, sort the rows into buckets
-    #5. SELECT, with the sorted buckets emit one row per bucket, making (commit_count) # of rows back into (repo_count) # of rows
-    #6. ORDER, order the rows by commit_count descending orders
+    #1. initialize SQL query
+      #1.1 FROM, call repostitories r
+      #1.2. LEFT JOIN, call commits as c and find commits with matching repo_github_id and expand rows
+        #   -> (repo_count) # of rows -> (commit_count) # of rows
+        #    **  if a repo have no matching commit KEEP IT (THIS IS WHAT 'LEFT' DO)
+      #1.3. WHERE, filter out rows that are NOT the current user's github_id
+    #2. language filter: if lanague is provided, add the filter to the query and update params
+    #3. execute the repo_count query to get total number of repos and check if there is a next page (pagnination)
+    #4. After filtering add query that groups the rows by same repos
+      #4.1. GROUP BY, sort the rows into buckets
+      #4.2. ORDER, order the rows by commit_count descending orders
+      #4.3. LIMIT, limit the number of rows returned to per_page
+    #5. update the main SQL query params
+    #6. execute the main SQL query and fetch all rows
 
   #language breakdown: how many repos use each language
     cur.execute(
