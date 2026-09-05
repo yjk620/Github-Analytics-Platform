@@ -203,21 +203,40 @@ def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20, lan
       )
 
     for repo in repos:
+      #find the latest commit date for current repo
       cur.execute("SELECT MAX(committed_at) FROM commits WHERE repo_github_id = %s", (repo["id"],))
       latest_commit_date = cur.fetchone()[0]
+
+      #fetch the currnet etag
+      cur.execute("SELECT etag FROM repositories WHERE repo_github_id = %s", (repo["id"],))
+      etag = cur.fetchone()[0]
 
       if latest_commit_date is None: 
         since = "1970-01-01T00:00:00Z" #if no commits, set to epoch time
       else: since = latest_commit_date.isoformat() #convert datetime to ISO 8601 string
       since_param = f"since={since}"
 
+      #initialize header for commit request
+      commit_header = {"Authorization": f"Bearer {access_token}"}
+
+      #if etag exists replace with etag, if not keep it as it is
+      if etag:
+        commit_header = {"Authorization": f"Bearer {access_token}", "If-None-Match": etag}
+      else:
+        commit_header = {"Authorization": f"Bearer {access_token}"}
+
+
       commit_response = httpx.get(
         f"https://api.github.com/repos/{repo['owner']['login']}/{repo['name']}/commits?per_page=100&{since_param}",
-        headers={"Authorization": f"Bearer {access_token}"}
+        headers=commit_header
       )
 
-      #GitHub only sends a list of commits on 200. every other status sends a dict
-      #instead (409 = empty repo, 403 = rate limited), which would crash the loop below.
+      #if no change has been made since last load Github returns 304, so no data to update -> continue
+      if commit_response.status_code == 304:
+        continue
+
+      #if repo is empty/rate limited, skip and print error code
+      #409 = empty repo, 403 = rate limited
       if commit_response.status_code != 200:
         print(f"skipped {repo['name']}: HTTP {commit_response.status_code}")
         continue
@@ -242,6 +261,12 @@ def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20, lan
             comm["html_url"]
           )
         )
+      #update the new etag from server to db
+      cur.execute(
+        "UPDATE repositories SET etag = %s WHERE repo_github_id = %s",
+        (commit_response.headers.get("etag"), repo["id"])
+      )
+
     conn.commit()
 
 

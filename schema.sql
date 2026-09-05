@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS repositories (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     description TEXT
 );
+ALTER TABLE repositories ADD COLUMN IF NOT EXISTS etag TEXT;
+
 
 CREATE TABLE IF NOT EXISTS commits (
   sha TEXT PRIMARY KEY,

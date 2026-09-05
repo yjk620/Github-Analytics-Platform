@@ -156,20 +156,29 @@ A polished earlier phase beats a broken later one.
       - So the real fix at scale is restructuring — paginate to the current
         page's repos *before* aggregating — not adding an index.
       - Primary keys (`sessions.session_id` etc.) are indexed automatically.
-- [~] Rate limit handling — partially done, still the open Phase 2 item
-      - [x] Incremental fetch: `MAX(committed_at)` per repo becomes GitHub's
-            `since` param, so only new commits come back. Measured ~2.5s → ~2.0s
-            per dashboard load.
-      - **Important nuance:** `since` does NOT reduce rate limit usage. The limit
-        counts *requests*, not bytes, and the route still makes 1 + N calls per
-        load. It saves bandwidth and wasted INSERT attempts, not quota.
-      - [ ] **ETags / conditional requests** — this is the actual quota fix.
-            GitHub returns an `ETag` on every response; send it back as
-            `If-None-Match` and an unchanged repo answers `304 Not Modified`,
-            which does **not** count against the rate limit. For 5 repos where 4
-            are dormant that's 6 requests → 2.
+- [x] Rate limit handling — two layers, and they solve different problems:
+      - **`since`** — `MAX(committed_at)` per repo becomes GitHub's `since`
+        param, so a 200 response carries only new commits instead of the last
+        100. Saves bandwidth and wasted INSERT attempts. Does **not** save
+        quota: the limit counts *requests*, not bytes.
+      - **ETags** — the stored `repositories.etag` is sent back as
+        `If-None-Match`. An unchanged repo answers `304 Not Modified`, which
+        does not count against the rate limit at all.
+      - **Measured:** all 5 repos return 304 on a repeat load. Quota per
+        dashboard load went 6 → 1 (only `/user/repos` still counts). At 5000
+        req/hr that is ~830 refreshes → ~5000.
+      - **Wall-clock did not change (~1.8s).** A 304 is still a full network
+        round trip; only the body is empty. Latency is bounded by 1+N
+        sequential round trips, which is Phase 3's problem, not this one.
+        Worth remembering: measuring the wrong thing here would have made a
+        real 6x quota win look like it did nothing.
+      - Gotcha hit while building: the ETag `UPDATE` must be *inside* the repo
+        loop and *after* the inserts. Outside the loop it writes one repo's
+        ETag using leftover loop variables; before the inserts it can record
+        "up to date" for commits that never landed.
       - Note: `since` is inclusive, so the newest stored commit is returned every
         time. `ON CONFLICT (sha) DO NOTHING` absorbs it.
+- **Phase 2 complete (2026-09-05).**
 
 **Housekeeping TODO (raised 2026-09-04, not yet done):**
 - Expired sessions accumulate — 11 dead rows already. Needs a periodic
