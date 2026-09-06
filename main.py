@@ -8,11 +8,6 @@ import secrets
 
 app = FastAPI()
 
-#run schema.sql against whatever database this environment points at, so a fresh
-#deploy provisions its own tables. every statement is CREATE TABLE IF NOT EXISTS,
-#so running this on every boot is a no-op once the tables already exist.
-#note: this only CREATES tables - it cannot ALTER existing ones. changing a column
-#on a table that already exists still needs a manual ALTER (or a migration tool).
 def init_db():
   with open("schema.sql") as f:
     schema = f.read()
@@ -52,7 +47,7 @@ def callback(code: str):
   )
   access_token = access_token_response.json().get("access_token")
 
-#access token error case
+  #access token error case
   if not access_token:
     return {"error": "GitHub login failed"}
 
@@ -118,6 +113,122 @@ def callback(code: str):
 
   return session_response
 
+#pull every repo and commit for user from GitHub into database.
+#takes a cursor instead of opening its own connection, so the caller owns the transaction
+def sync_user(cur, access_token, github_id):
+  #fetch this user's repos from GitHub. returns a JSON array, not a single object
+  repos_response = httpx.get(
+    "https://api.github.com/user/repos?per_page=100&affiliation=owner",
+    headers={"Authorization": f"Bearer {access_token}"}
+  )
+
+  #GitHub only sends a list of repos on 200. every other status sends an error msg
+  if repos_response.status_code != 200:
+    print(f"sync_user: skipping {github_id}, repos fetch returned HTTP {repos_response.status_code}")
+    return
+
+  repos = repos_response.json()
+
+  #upsert each repo. same ON CONFLICT pattern as users - repos change over time
+  for repo in repos:
+    cur.execute(
+      """
+        INSERT INTO repositories (
+          repo_github_id, owner_github_id, name, language,
+          stars_count, html_url, fork, fork_count, pushed_at, description
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (repo_github_id) DO UPDATE SET
+          name = EXCLUDED.name,
+          language = EXCLUDED.language,
+          stars_count = EXCLUDED.stars_count,
+          html_url = EXCLUDED.html_url,
+          fork = EXCLUDED.fork,
+          fork_count = EXCLUDED.fork_count,
+          pushed_at = EXCLUDED.pushed_at,
+          updated_at = NOW(),
+          description = EXCLUDED.description
+      """,
+      (
+        repo["id"],
+        github_id,
+        repo["name"],
+        repo["language"],
+        repo["stargazers_count"],
+        repo["html_url"],
+        repo["fork"],
+        repo["forks_count"],
+        repo["pushed_at"],
+        repo["description"]
+      )
+    )
+
+  for repo in repos:
+    #find the latest commit date for current repo
+    cur.execute("SELECT MAX(committed_at) FROM commits WHERE repo_github_id = %s", (repo["id"],))
+    latest_commit_date = cur.fetchone()[0]
+
+    #fetch the currnet etag
+    cur.execute("SELECT etag FROM repositories WHERE repo_github_id = %s", (repo["id"],))
+    etag = cur.fetchone()[0]
+
+    if latest_commit_date is None: 
+      since = "1970-01-01T00:00:00Z" #if no commits, set to epoch time
+    else: since = latest_commit_date.isoformat() #convert datetime to ISO 8601 string
+    since_param = f"since={since}"
+
+    #initialize header for commit request
+    commit_header = {"Authorization": f"Bearer {access_token}"}
+
+    #if etag exists replace with etag, if not keep it as it is
+    if etag:
+      commit_header = {"Authorization": f"Bearer {access_token}", "If-None-Match": etag}
+    else:
+      commit_header = {"Authorization": f"Bearer {access_token}"}
+
+
+    commit_response = httpx.get(
+      f"https://api.github.com/repos/{repo['owner']['login']}/{repo['name']}/commits?per_page=100&{since_param}",
+      headers=commit_header
+    )
+
+    #if no change has been made since last load Github returns 304, so no data to update -> continue
+    if commit_response.status_code == 304:
+      continue
+
+    #if repo is empty/rate limited, skip and print error code
+    #409 = empty repo, 403 = rate limited
+    if commit_response.status_code != 200:
+      print(f"skipped {repo['name']}: HTTP {commit_response.status_code}")
+      continue
+
+    comms = commit_response.json()
+
+    for comm in comms:
+      cur.execute(
+        """
+          INSERT INTO commits (
+            sha, repo_github_id, message, author_name,
+            committed_at, html_url)
+          VALUES (%s, %s, %s, %s, %s, %s)
+          ON CONFLICT (sha) DO NOTHING
+        """,
+        (
+          comm["sha"],
+          repo["id"],
+          comm["commit"]["message"],
+          comm["commit"]["author"]["name"],
+          comm["commit"]["author"]["date"],
+          comm["html_url"]
+        )
+      )
+    #update the new etag from server to db
+    cur.execute(
+      "UPDATE repositories SET etag = %s WHERE repo_github_id = %s",
+      (commit_response.headers.get("etag"), repo["id"])
+    )
+
+
 #route #3: protected page. reads the session cookie, fetches the user's repos
 #from GitHub, stores them, and returns the user plus their repo list
 @app.get("/dashboard")
@@ -152,125 +263,13 @@ def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20, lan
   #label the values in the row for easier access later
     github_id, login, name, avatar_url, bio, access_token = row
 
-
-
-
-  #================== repositories ==========================
-    #fetch this user's repos from GitHub. returns a JSON array, not a single object
-    repos_response = httpx.get(
-      "https://api.github.com/user/repos?per_page=100&affiliation=owner",
-      headers={"Authorization": f"Bearer {access_token}"}
-    )
-
-    #GitHub only sends a list of repos on 200. every other status sends an error msg
-    if repos_response.status_code != 200:
-      return {"error": f"Could not fetch repos from GitHub (HTTP {repos_response.status_code})"}
-
-    repos = repos_response.json()
-
-    #upsert each repo. same ON CONFLICT pattern as users - repos change over time
-    for repo in repos:
-      cur.execute(
-        """
-          INSERT INTO repositories (
-            repo_github_id, owner_github_id, name, language,
-            stars_count, html_url, fork, fork_count, pushed_at, description
-          )
-          VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-          ON CONFLICT (repo_github_id) DO UPDATE SET
-            name = EXCLUDED.name,
-            language = EXCLUDED.language,
-            stars_count = EXCLUDED.stars_count,
-            html_url = EXCLUDED.html_url,
-            fork = EXCLUDED.fork,
-            fork_count = EXCLUDED.fork_count,
-            pushed_at = EXCLUDED.pushed_at,
-            updated_at = NOW(),
-            description = EXCLUDED.description
-        """,
-        (
-          repo["id"],
-          github_id,
-          repo["name"],
-          repo["language"],
-          repo["stargazers_count"],
-          repo["html_url"],
-          repo["fork"],
-          repo["forks_count"],
-          repo["pushed_at"],
-          repo["description"]
-        )
-      )
-
-    for repo in repos:
-      #find the latest commit date for current repo
-      cur.execute("SELECT MAX(committed_at) FROM commits WHERE repo_github_id = %s", (repo["id"],))
-      latest_commit_date = cur.fetchone()[0]
-
-      #fetch the currnet etag
-      cur.execute("SELECT etag FROM repositories WHERE repo_github_id = %s", (repo["id"],))
-      etag = cur.fetchone()[0]
-
-      if latest_commit_date is None: 
-        since = "1970-01-01T00:00:00Z" #if no commits, set to epoch time
-      else: since = latest_commit_date.isoformat() #convert datetime to ISO 8601 string
-      since_param = f"since={since}"
-
-      #initialize header for commit request
-      commit_header = {"Authorization": f"Bearer {access_token}"}
-
-      #if etag exists replace with etag, if not keep it as it is
-      if etag:
-        commit_header = {"Authorization": f"Bearer {access_token}", "If-None-Match": etag}
-      else:
-        commit_header = {"Authorization": f"Bearer {access_token}"}
-
-
-      commit_response = httpx.get(
-        f"https://api.github.com/repos/{repo['owner']['login']}/{repo['name']}/commits?per_page=100&{since_param}",
-        headers=commit_header
-      )
-
-      #if no change has been made since last load Github returns 304, so no data to update -> continue
-      if commit_response.status_code == 304:
-        continue
-
-      #if repo is empty/rate limited, skip and print error code
-      #409 = empty repo, 403 = rate limited
-      if commit_response.status_code != 200:
-        print(f"skipped {repo['name']}: HTTP {commit_response.status_code}")
-        continue
-
-      comms = commit_response.json()
-
-      for comm in comms:
-        cur.execute(
-          """
-            INSERT INTO commits (
-              sha, repo_github_id, message, author_name,
-              committed_at, html_url)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (sha) DO NOTHING
-          """,
-          (
-            comm["sha"],
-            repo["id"],
-            comm["commit"]["message"],
-            comm["commit"]["author"]["name"],
-            comm["commit"]["author"]["date"],
-            comm["html_url"]
-          )
-        )
-      #update the new etag from server to db
-      cur.execute(
-        "UPDATE repositories SET etag = %s WHERE repo_github_id = %s",
-        (commit_response.headers.get("etag"), repo["id"])
-      )
+  #================== sync ==========================
+    #syncing user data from Github to db.
+    sync_user(cur, access_token, github_id)
 
     conn.commit()
 
-
-
+  #=============pagination and filtering================
     #create rows by repo containing all of its commits
     #pagination 20 repos per page
     #filter by language
@@ -323,7 +322,7 @@ def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20, lan
     #5. update the main SQL query params
     #6. execute the main SQL query and fetch all rows
 
-  #language breakdown: how many repos use each language
+  #================language breakdown==============
     cur.execute(
       """
         SELECT r.language, COUNT(*) AS repo_count
@@ -342,9 +341,7 @@ def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20, lan
     #4. SELECT, count each bucket as repo_count
     #5. ORDER, sort by descending repo_count
 
-
-
-    #commit activiy overtime
+    #================commit activity over time================
     cur.execute (
       """
         SELECT DATE_TRUNC('month', c.committed_at) AS month, COUNT(*) AS commit_count
