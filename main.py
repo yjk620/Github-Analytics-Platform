@@ -407,3 +407,78 @@ def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20, lan
     }
   finally:
     conn.close()
+
+@app.get("/dashboard/{repo_name}")
+def get_repo_detail(repo_name: str, session_id: str = Cookie(None), page: int = 1, per_page: int = 20):
+  conn = psycopg.connect(settings.database_url)
+  try:
+    cur = conn.cursor()
+
+    #look up user seesion
+    cur.execute(
+      "SELECT github_id FROM sessions WHERE session_id = %s AND expires_at > NOW()", (session_id,)
+    )
+    row = cur.fetchone()
+    if row is None:
+      return {"error": "Not Logged In"} 
+
+    #fetch user repo
+    cur.execute(
+      """
+      SELECT r.name, r.language, r.stars_count, r.html_url, r.pushed_at, r.description, COUNT(c.sha)
+      FROM repositories r
+      LEFT JOIN commits c ON r.repo_github_id = c.repo_github_id
+      WHERE r.owner_github_id = %s AND r.name = %s
+      GROUP BY r.name, r.language, r.stars_count, r.html_url, r.pushed_at, r.description
+      """,
+      (row[0], repo_name)
+    )
+    repo_row = cur.fetchone()
+
+    if repo_row is None:
+      return {"error": "Repository not found"}
+
+    #fetch user commits for the repo
+    offset = (page - 1) * per_page
+    cur.execute(
+      """
+      SELECT c.sha, c.message, c.author_name, c.committed_at, c.html_url
+      FROM commits c
+      JOIN repositories r ON c.repo_github_id = r.repo_github_id
+      WHERE r.owner_github_id = %s AND r.name = %s
+      ORDER BY c.committed_at DESC
+      LIMIT %s OFFSET %s
+      """,
+      (row[0], repo_name, per_page, offset)
+    )
+    commit_rows = cur.fetchall()
+
+    return {
+      "repo": {
+        "name": repo_row[0],
+        "language": repo_row[1],
+        "stars": repo_row[2],
+        "url": repo_row[3],
+        "pushed_at": repo_row[4],
+        "description": repo_row[5],
+        "commit_count": repo_row[6]
+      },
+      "commits": [
+        {
+          "sha": c[0],
+          "message": c[1],
+          "author_name": c[2],
+          "committed_at": c[3],
+          "html_url": c[4]
+        }
+        for c in commit_rows
+      ],
+      "pagination": {
+        "page": page,
+        "per_page": per_page,
+        "total": repo_row[6],
+        "has_next": repo_row[6] > page * per_page
+      }
+    }
+  finally: 
+    conn.close()
