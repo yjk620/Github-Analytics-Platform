@@ -234,6 +234,7 @@ def sync_user(cur, access_token, github_id):
       (commit_response.headers.get("etag"), repo["id"])
     )
 
+#sync all users registered in database
 def sync_all_users():
   conn = psycopg.connect(settings.database_url)
   try:
@@ -251,9 +252,22 @@ def sync_all_users():
   finally:
     conn.close()
 
+#cleanup for expired sessions
+def cleanup_sessions():
+  conn = psycopg.connect(settings.database_url)
+  try:
+    cur = conn.cursor()
+    cur.execute("DELETE FROM sessions WHERE expires_at < NOW()")
+    conn.commit()
+  finally:
+    conn.close()
+
 scheduler = BackgroundScheduler()
 scheduler.add_job(sync_all_users, 'interval', hours=1)
+scheduler.add_job(cleanup_sessions, 'interval', hours=24)
 scheduler.start()
+
+
 
 #route #3: protected page. reads the session cookie, fetches the user's repos
 #from GitHub, stores them, and returns the user plus their repo list
