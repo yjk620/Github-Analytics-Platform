@@ -215,7 +215,12 @@ A polished earlier phase beats a broken later one.
       cannot: a brand-new user has no row in `users` until they log in.
 - [x] Dashboard no longer calls GitHub. **Measured 1.85s → 0.0065s (~280x).**
       Route is now read-only: five SELECTs, no commit.
-- [ ] Deploy and verify the job runs on Railway
+- [x] Deployed to Railway and working
+- [ ] **Not yet observed:** the hourly job actually firing in production. Check
+      Railway logs after the app has been up an hour — look for sync activity, or
+      `sync_user: skipping ...` lines if a token went bad. Cannot be verified
+      locally because `--reload` restarts the process on every file save, which
+      resets the interval timer before it ever elapses.
 - Done when: log in, close the app, data keeps updating on its own.
 - **Tradeoff accepted:** data can be up to an hour stale. Fine for coding
   analytics; would not be for anything real-time. See the manual-refresh TODO.
