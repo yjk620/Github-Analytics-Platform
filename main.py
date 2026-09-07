@@ -516,3 +516,18 @@ def get_repo_detail(repo_name: str, session_id: str = Cookie(None), page: int = 
     }
   finally: 
     conn.close()
+
+@app.get("/logout")
+def logout(session_id: str = Cookie(None)):
+  conn = psycopg.connect(settings.database_url)
+  try:
+    cur = conn.cursor()
+    cur.execute("DELETE FROM sessions WHERE session_id = %s", (session_id,))
+    conn.commit()
+    response = RedirectResponse(url="/")
+    response.delete_cookie(key="session_id")
+    return response
+  finally:
+    conn.close()
+
+
