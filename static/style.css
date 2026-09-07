@@ -1,0 +1,147 @@
+/* dark navy ground, cream ink */
+:root {
+  --navy-900: #0b1120;
+  --navy-800: #111a2e;
+  --navy-700: #1a2540;
+  --navy-600: #26324f;
+  --cream:    #f2ead8;
+  --cream-dim:#a9a48f;
+  --accent:   #d9a441;
+  --line:     #2a3550;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--navy-900);
+  color: var(--cream);
+  font-family: var(--sans);
+  line-height: 1.5;
+}
+
+.wrap { max-width: 880px; margin: 0 auto; padding: 0 1.5rem; }
+
+/* ---------- landing ---------- */
+#landing {
+  /* subtract the topbar so this really is one screen tall, not one screen plus it.
+     the padding-bottom lifts the centred block clear of the absolutely-positioned
+     scroll cue, which flex centring cannot see. */
+  min-height: calc(100vh - 3.5rem);
+  padding-bottom: 6rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.75rem;
+  position: relative;
+}
+#landing img.avatar {
+  width: 132px; height: 132px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+}
+#landing h1 { font-size: 2.1rem; margin: 0.6rem 0 0; text-wrap: balance; }
+#landing .login-name { font-family: var(--mono); color: var(--accent); font-size: 0.9rem; }
+#landing .bio { color: var(--cream-dim); max-width: 46ch; margin: 0.4rem 0 0; }
+
+.scroll-cue {
+  position: absolute; bottom: 2.5rem;
+  color: var(--cream-dim); font-size: 0.78rem;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  background: none; border: 0; cursor: pointer;
+  font-family: var(--sans);
+  display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+}
+.scroll-cue .arrow { font-size: 1.4rem; animation: bob 1.9s ease-in-out infinite; }
+@keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { .scroll-cue .arrow { animation: none; } }
+
+/* ---------- sections ---------- */
+section { padding: 3.5rem 0; }
+h2 {
+  font-size: 0.78rem; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--cream-dim); margin: 0 0 1rem; font-weight: 600;
+}
+
+/* ---------- language bar ---------- */
+.langbar { display: flex; height: 2.4rem; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); }
+.langbar .seg {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.72rem; font-weight: 600; color: var(--navy-900);
+  overflow: hidden; white-space: nowrap;
+}
+.langkey { display: flex; flex-wrap: wrap; gap: 0.9rem; margin-top: 0.7rem; font-size: 0.78rem; color: var(--cream-dim); }
+.langkey span { display: flex; align-items: center; gap: 0.4rem; }
+.langkey i { width: 0.7rem; height: 0.7rem; border-radius: 2px; display: inline-block; }
+
+/* ---------- activity chart ---------- */
+.chart { display: flex; align-items: flex-end; gap: 0.6rem; height: 190px; }
+.chart .col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.4rem; height: 100%; justify-content: flex-end; }
+.chart .bar {
+  width: 100%; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 3px;
+}
+.chart .count { font-family: var(--mono); font-size: 0.72rem; color: var(--cream); }
+.chart .month { font-family: var(--mono); font-size: 0.68rem; color: var(--cream-dim); }
+
+/* ---------- repo list ---------- */
+.filter { margin-bottom: 1rem; }
+.filter select {
+  background: var(--navy-800); color: var(--cream); border: 1px solid var(--line);
+  border-radius: 5px; padding: 0.35rem 0.6rem; font-family: var(--sans); font-size: 0.82rem;
+}
+.repo {
+  width: 100%; text-align: left; cursor: pointer;
+  background: var(--navy-800); border: 1px solid var(--line); color: inherit;
+  border-radius: 8px; padding: 0.9rem 1.1rem; margin-bottom: 0.6rem;
+  font-family: var(--sans); font-size: 1rem;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 1rem;
+}
+.repo:hover { background: var(--navy-700); border-color: var(--navy-600); }
+.repo:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.repo .name { font-weight: 600; }
+.repo .desc { color: var(--cream-dim); font-size: 0.82rem; margin-top: 0.2rem; }
+.repo .meta { font-family: var(--mono); font-size: 0.75rem; color: var(--cream-dim); white-space: nowrap; }
+.repo .meta b { color: var(--accent); font-weight: 600; }
+
+/* ---------- pagination ---------- */
+.pager { display: flex; gap: 0.4rem; justify-content: center; margin-top: 1.25rem; }
+.pager button {
+  background: var(--navy-800); border: 1px solid var(--line); color: var(--cream);
+  border-radius: 5px; min-width: 2.2rem; padding: 0.35rem 0.5rem;
+  font-family: var(--mono); font-size: 0.82rem; cursor: pointer;
+}
+.pager button:hover:not(:disabled) { background: var(--navy-700); }
+.pager button[aria-current="page"] { background: var(--accent); border-color: var(--accent); color: var(--navy-900); font-weight: 700; }
+.pager button:disabled { opacity: 0.35; cursor: default; }
+.pager .gap { color: var(--cream-dim); padding: 0.35rem 0.2rem; font-family: var(--mono); }
+
+/* ---------- repo detail ---------- */
+.backbtn {
+  background: none; border: 0; color: var(--accent); cursor: pointer;
+  font-family: var(--sans); font-size: 0.85rem; padding: 0; margin-bottom: 1.25rem;
+}
+.detail-head { border-bottom: 1px solid var(--line); padding-bottom: 1.25rem; margin-bottom: 1.75rem; }
+.detail-head h1 { margin: 0 0 0.35rem; font-size: 1.6rem; }
+.detail-head .desc { color: var(--cream-dim); margin: 0 0 0.75rem; }
+.detail-head .stats { display: flex; flex-wrap: wrap; gap: 1.4rem; font-family: var(--mono); font-size: 0.8rem; color: var(--cream-dim); }
+.detail-head .stats b { color: var(--accent); font-weight: 600; }
+.detail-head a { color: var(--accent); font-size: 0.8rem; }
+
+.commit {
+  background: var(--navy-800); border: 1px solid var(--line);
+  border-radius: 8px; padding: 0.85rem 1.1rem; margin-bottom: 0.6rem;
+}
+.commit .msg { white-space: pre-wrap; overflow-wrap: anywhere; }
+.commit .meta { font-family: var(--mono); font-size: 0.73rem; color: var(--cream-dim); margin-top: 0.4rem; display: flex; gap: 1rem; flex-wrap: wrap; }
+.commit .meta a { color: var(--accent); text-decoration: none; }
+
+/* ---------- misc ---------- */
+.topbar { display: flex; justify-content: flex-end; padding-top: 1.2rem; }
+.topbar button { background: none; border: 1px solid var(--line); color: var(--cream-dim); border-radius: 5px; padding: 0.3rem 0.7rem; font-size: 0.78rem; cursor: pointer; }
+.topbar button:hover { color: var(--cream); border-color: var(--navy-600); }
+.empty { color: var(--cream-dim); font-style: italic; }
+.login-cta { display: inline-block; background: var(--accent); color: var(--navy-900); font-weight: 700; padding: 0.7rem 1.4rem; border-radius: 6px; text-decoration: none; }

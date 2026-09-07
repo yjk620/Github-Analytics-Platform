@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Cookie
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from config import settings
 from apscheduler.schedulers.background import BackgroundScheduler
 import psycopg
@@ -24,6 +25,16 @@ init_db()
 
 #Boolean flag variable, if redirect_uri -> True (cookie secure), else False (cookie not secure)
 COOKIE_SECURE = settings.github_redirect_uri.startswith("https://")
+
+#serve the front end from this same app, so it shares an origin with the API.
+#that is what lets the session cookie work untouched: same origin means the
+#browser sends it automatically, so no CORS and no weakening samesite.
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+#route #0: the front end itself. everything it needs comes from the JSON routes below.
+@app.get("/")
+def index():
+  return FileResponse("static/index.html")
 
 #hcheck health: checks if the app is running and returns the test_value from the .env file
 @app.get("/health")
