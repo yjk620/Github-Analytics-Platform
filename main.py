@@ -265,10 +265,11 @@ def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20, lan
     cur = conn.cursor()
 
   #================ sessions ========================
-    #find who this session belongs to. access_token is needed to call GitHub below
+    #find who this session belongs to. no access_token needed - this route never
+    #calls GitHub anymore, it only reads what the background sync already stored.
     cur.execute(
       """
-        SELECT u.github_id, u.login, u.name, u.avatar_url, u.bio, u.access_token
+        SELECT u.github_id, u.login, u.name, u.avatar_url, u.bio
         FROM sessions s
         JOIN users u ON s.github_id = u.github_id
         WHERE s.session_id = %s AND s.expires_at > NOW()
@@ -287,13 +288,10 @@ def dashboard(session_id: str = Cookie(None), page: int=1, per_page: int=20, lan
       return {"error": "Not Logged In"}
 
   #label the values in the row for easier access later
-    github_id, login, name, avatar_url, bio, access_token = row
+    github_id, login, name, avatar_url, bio = row
 
-  #================== sync ==========================
-    #syncing user data from Github to db.
-    sync_user(cur, access_token, github_id)
-
-    conn.commit()
+    #no conn.commit() here on purpose - this route is now read-only. every query
+    #below is a SELECT, so there is nothing to commit.
 
   #=============pagination and filtering================
     #create rows by repo containing all of its commits

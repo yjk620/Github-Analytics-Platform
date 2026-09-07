@@ -180,22 +180,48 @@ A polished earlier phase beats a broken later one.
         time. `ON CONFLICT (sha) DO NOTHING` absorbs it.
 - **Phase 2 complete (2026-09-05).**
 
-**Housekeeping TODO (raised 2026-09-04, not yet done):**
-- Expired sessions accumulate — 11 dead rows already. Needs a periodic
-  `DELETE FROM sessions WHERE expires_at < NOW()`. Natural fit for the Phase 3
-  scheduler rather than a separate mechanism.
+**Open TODOs (raised 2026-09-04 / 09-06, not yet done):**
+- **Expired session cleanup** — dead rows accumulate (11 as of 09-04). Needs a
+  periodic `DELETE FROM sessions WHERE expires_at < NOW()`. Now that APScheduler
+  exists, this is a second `add_job`, not a new mechanism.
+- **Manual refresh endpoint** (user wants this) — with sync moved to an hourly
+  job, a user who just pushed waits up to an hour to see it. A `POST /sync` that
+  calls `sync_user` for the logged-in user turns "wait" into "click Refresh".
+  ~15 lines, and it reuses `sync_user` unchanged — a third caller with no edits
+  to the function, which is the payoff of having extracted it. Real dashboards
+  usually do both: scheduled sync for the baseline, manual refresh on demand.
+  The "correct" but much larger answer is GitHub webhooks (already listed as an
+  out-of-scope stretch goal).
 - `init_db()` is the one DB function without `try/finally`. Harmless (a failure
   there kills startup anyway) but inconsistent with `callback` and `dashboard`.
 - Done when: dashboard shows commit analytics, repo list filters/paginates
   server-side. **This is the point the project becomes resume-worthy.**
 
 **Phase 3 — Background sync**
-- Move GitHub fetching out of the request path into a scheduled job (APScheduler)
-- Re-sync repos and commits on a schedule
-- Dashboard reads from the database, never GitHub directly
-- Incremental sync (only fetch what changed)
+- [x] `sync_user(cur, access_token, github_id)` extracted from the dashboard route
+      to module level, so callers other than a request handler can use it.
+      Takes a cursor rather than opening its own connection: the caller owns the
+      transaction. Gotcha found during extraction — a `return {"error": ...}`
+      came along for the ride; in a route that was the HTTP response, in a plain
+      function the value goes nowhere and the caller silently continues.
+- [x] `sync_all_users()` — queries every user, calls `sync_user` per row.
+      Each user gets its own try/except + commit, so one revoked token cannot
+      abort the batch, and a failure rolls back only that user. Note psycopg
+      requires the explicit `rollback()`: after an error the transaction is
+      aborted and every later statement fails until it happens.
+- [x] APScheduler `BackgroundScheduler`, hourly. Runs in a thread beside uvicorn.
+- [x] Sync on login in `/auth/callback`, wrapped in try/except so a sync failure
+      cannot block login. Covers the cold start the scheduler structurally
+      cannot: a brand-new user has no row in `users` until they log in.
+- [x] Dashboard no longer calls GitHub. **Measured 1.85s → 0.0065s (~280x).**
+      Route is now read-only: five SELECTs, no commit.
+- [ ] Deploy and verify the job runs on Railway
 - Done when: log in, close the app, data keeps updating on its own.
-- Build only after feeling the pain of per-request fetching in Phases 1–2.
+- **Tradeoff accepted:** data can be up to an hour stale. Fine for coding
+  analytics; would not be for anything real-time. See the manual-refresh TODO.
+- Note on "startup": the interval timer resets every process start — every
+  `--reload` save locally, every deploy on Railway. Frequent during development,
+  rare in steady state.
 
 ## Timing
 
