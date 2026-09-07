@@ -41,4 +41,4 @@ CREATE TABLE IF NOT EXISTS commits (
   committed_at TIMESTAMPTZ NOT NULL,
   html_url TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-)
+);

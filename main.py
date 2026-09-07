@@ -13,10 +13,12 @@ def init_db():
   with open("schema.sql") as f:
     schema = f.read()
   conn = psycopg.connect(settings.database_url)
-  cur = conn.cursor()
-  cur.execute(schema)
-  conn.commit()
-  conn.close()
+  try:
+    cur = conn.cursor()
+    cur.execute(schema)
+    conn.commit()
+  finally:
+    conn.close()
 
 init_db()
 
@@ -182,9 +184,6 @@ def sync_user(cur, access_token, github_id):
       since = "1970-01-01T00:00:00Z" #if no commits, set to epoch time
     else: since = latest_commit_date.isoformat() #convert datetime to ISO 8601 string
     since_param = f"since={since}"
-
-    #initialize header for commit request
-    commit_header = {"Authorization": f"Bearer {access_token}"}
 
     #if etag exists replace with etag, if not keep it as it is
     if etag:
